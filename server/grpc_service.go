@@ -1042,6 +1042,9 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 		return nil, io.EOF
 	}
 	req, err := b.stream.Recv()
+	if err == io.EOF {
+		return nil, io.EOF
+	}
 	if err != nil {
 		atomic.StoreInt32(&b.closed, 1)
 		return nil, errors.WithStack(err)
@@ -1227,6 +1230,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		}
 	}
 }
+
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
