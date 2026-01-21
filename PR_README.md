@@ -18,7 +18,18 @@ Because the `io.EOF` was wrapped, this equality check failed, treating the EOF a
 
 Added a new regression test `TestBucketHeartbeatServerRecvEOF` in `server/grpc_service_test.go` which simulates the `Recv` method returning `io.EOF` and asserts that the `recv` wrapper returns it unwrapped.
 
-Run the test with:
+Run the specific reproduction test:
 ```bash
 go test -v ./server -run TestBucketHeartbeatServerRecvEOF
 ```
+
+Run regression tests for the server package:
+```bash
+go test -v ./tests/server/...
+```
+
+## Logic
+Both `bucketHeartbeatServer` and `tsoServer` have `recv` methods that wrap the underlying gRPC stream's `Recv()`. 
+Previously, `io.EOF` was treated like any other error and wrapped with `errors.WithStack(err)`. 
+This change adds an explicit check: if the error is `io.EOF`, it is returned immediately unwrapped. 
+This allows callers (like `GrpcServer.ReportBuckets`) to correctly identify the end of the stream using `err == io.EOF`.
