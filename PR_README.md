@@ -1,35 +1,59 @@
-# Fix wrong usage of gRPC interface in ReportBuckets
+# Fix Wrong Usage of gRPC Interface in ReportBuckets
 
-## What is changed?
+## Problem Summary
+In `pd/server/grpc_service.go`, the `recv()` methods for `bucketHeartbeatServer` and `tsoServer` were wrapping `io.EOF` errors with a stack trace using `errors.WithStack(err)`. 
 
-This PR fixes an issue where the `io.EOF` error returned by the gRPC stream in `bucketHeartbeatServer.recv()` and `tsoServer.recv()` was being incorrectly wrapped with a stack trace using `errors.WithStack(err)`. 
+This wrapping caused the error comparison `err == io.EOF` to fail at the call sites (e.g., in `ReportBuckets`), treating a graceful stream termination as an unexpected error.
 
-## Why is this change needed?
+## Root Cause Analysis
+The `github.com/pingcap/errors` package's `WithStack` function creates a new error wrapping the original. Standard equality checks (`==`) fail when comparing the wrapped error against the sentinel `io.EOF`.
 
-The caller of `recv()`, `ReportBuckets`, explicitly checks for `err == io.EOF` to determine if the stream has ended gracefully. 
+**Problematic Code (Before):**
 ```go
-if err == io.EOF {
+req, err := b.stream.Recv()
+if err != nil { // io.EOF is caught here
+    atomic.StoreInt32(&b.closed, 1)
+    return nil, errors.WithStack(err) // Wraps io.EOF, breaking equality checks
+}
+```
+
+**Caller Expectation:**
+```go
+// grpc_service.go:1082 (approx)
+if err == io.EOF { // Fails because err is struct{stack, cause=io.EOF}
     return nil
 }
 ```
-Because the `io.EOF` was wrapped, this equality check failed, treating the EOF as a regular error.
+
+## Solution
+I modified `bucketHeartbeatServer.recv()` and `tsoServer.recv()` to explicitly check for `io.EOF` and return it unwrapped.
+
+**Fix Applied:**
+```go
+req, err := b.stream.Recv()
+// ...
+if err != nil {
+    atomic.StoreInt32(&b.closed, 1)
+    if err == io.EOF {
+        return nil, io.EOF // Return unwrapped sentinel
+    }
+    return nil, errors.WithStack(err)
+}
+```
 
 ## Verification
 
-Added a new regression test `TestBucketHeartbeatServerRecvEOF` in `server/grpc_service_test.go` which simulates the `Recv` method returning `io.EOF` and asserts that the `recv` wrapper returns it unwrapped.
+### 1. Reproduction Test
+A new test `TestBucketHeartbeatServerRecvEOF` was added to `server/grpc_service_test.go`. It mocks the gRPC stream to return `io.EOF` and asserts that `recv()` returns the exact sentinel error.
 
-Run the specific reproduction test:
+**Run the reproduction test:**
 ```bash
 go test -v ./server -run TestBucketHeartbeatServerRecvEOF
 ```
 
-Run regression tests for the server package:
+### 2. Regression Testing
+Run the full suite of tests for the server package to ensure no side effects:
+
 ```bash
 go test -v ./tests/server/...
 ```
-
-## Logic
-Both `bucketHeartbeatServer` and `tsoServer` have `recv` methods that wrap the underlying gRPC stream's `Recv()`. 
-Previously, `io.EOF` was treated like any other error and wrapped with `errors.WithStack(err)`. 
-This change adds an explicit check: if the error is `io.EOF`, it is returned immediately unwrapped. 
-This allows callers (like `GrpcServer.ReportBuckets`) to correctly identify the end of the stream using `err == io.EOF`.
