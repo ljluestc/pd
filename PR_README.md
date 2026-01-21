@@ -2,7 +2,7 @@
 
 ## What is changed?
 
-This PR fixes an issue where the `io.EOF` error returned by the gRPC stream in `bucketHeartbeatServer.recv()` was being incorrectly wrapped with a stack trace using `errors.WithStack(err)`. 
+This PR fixes an issue where the `io.EOF` error returned by the gRPC stream in `bucketHeartbeatServer.recv()` and `tsoServer.recv()` was being incorrectly wrapped with a stack trace using `errors.WithStack(err)`. 
 
 ## Why is this change needed?
 

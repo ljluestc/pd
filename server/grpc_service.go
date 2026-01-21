@@ -142,6 +142,9 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	case req := <-requestCh:
 		if req.err != nil {
 			atomic.StoreInt32(&s.closed, 1)
+			if req.err == io.EOF {
+				return nil, io.EOF
+			}
 			return nil, errors.WithStack(req.err)
 		}
 		return req.request, nil
@@ -190,6 +193,9 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 	req, err := s.stream.Recv()
 	if err != nil {
 		atomic.StoreInt32(&s.closed, 1)
+		if err == io.EOF {
+			return nil, err
+		}
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
