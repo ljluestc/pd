@@ -97,6 +97,41 @@ func TestCloneMetaStore(t *testing.T) {
 	re.NotEqual(store2.Labels, store.Labels)
 }
 
+func TestSetStoreMetaPreservesLastHeartbeat(t *testing.T) {
+	re := require.New(t)
+	oldHeartbeat := time.Now().Add(-time.Minute).UnixNano()
+	store := NewStoreInfo(&metapb.Store{
+		Id:            1,
+		Address:       "mock://tikv-1:1",
+		LastHeartbeat: oldHeartbeat,
+	})
+
+	// Preserve old heartbeat when new store meta carries no heartbeat info.
+	store = store.Clone(SetStoreMeta(&metapb.Store{
+		Id:      1,
+		Address: "mock://tikv-1:2",
+	}))
+	re.Equal(oldHeartbeat, store.GetMeta().GetLastHeartbeat())
+
+	// Accept newer heartbeat from incoming store meta.
+	newHeartbeat := oldHeartbeat + int64(30*time.Second)
+	store = store.Clone(SetStoreMeta(&metapb.Store{
+		Id:            1,
+		Address:       "mock://tikv-1:3",
+		LastHeartbeat: newHeartbeat,
+	}))
+	re.Equal(newHeartbeat, store.GetMeta().GetLastHeartbeat())
+
+	// Reject older heartbeat from incoming store meta.
+	store = store.Clone(SetStoreMeta(&metapb.Store{
+		Id:            1,
+		Address:       "mock://tikv-1:4",
+		LastHeartbeat: oldHeartbeat,
+	}))
+	re.Equal(newHeartbeat, store.GetMeta().GetLastHeartbeat())
+	re.Equal("mock://tikv-1:4", store.GetMeta().GetAddress())
+}
+
 func BenchmarkStoreClone(b *testing.B) {
 	meta := &metapb.Store{Id: 1,
 		Address: "mock://tikv-1:1",

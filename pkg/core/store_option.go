@@ -318,7 +318,8 @@ func SetNetworkSlowTriggers(networkSlowTriggers uint64) StoreCreateOption {
 }
 
 // SetStoreMeta sets the meta for the store.
-// NOTICE: LastHeartbeat is not persisted each time, so it is not set by this function. Please use SetLastHeartbeatTS instead.
+// NOTICE: LastHeartbeat is usually updated via heartbeat and may be absent in newMeta.
+// Keep the existing value unless the incoming LastHeartbeat is newer.
 func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
@@ -333,6 +334,9 @@ func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 		meta.Labels = newMeta.GetLabels()
 		meta.NodeState = newMeta.GetNodeState()
 		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
+		if newMeta.GetLastHeartbeat() > meta.GetLastHeartbeat() {
+			meta.LastHeartbeat = newMeta.GetLastHeartbeat()
+		}
 		store.meta = meta
 	}
 }
