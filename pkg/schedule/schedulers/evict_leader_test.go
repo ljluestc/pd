@@ -27,6 +27,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -250,4 +252,32 @@ func TestEvictLeaderDeleteWithSaveFailure(t *testing.T) {
 	re.Contains(conf.StoreIDWithRanges, uint64(1), "store should be restored after save failure")
 	re.Equal(keyRanges, conf.StoreIDWithRanges[1], "key ranges should be restored")
 	re.Empty(resp)
+}
+
+type panicOnMissingStoreCluster struct {
+	*mockcluster.Cluster
+}
+
+func (c *panicOnMissingStoreCluster) ResumeLeaderTransfer(id uint64, d constant.Direction) {
+	if c.GetStore(id) == nil {
+		panic("resume leader transfer with missing store")
+	}
+	c.Cluster.ResumeLeaderTransfer(id, d)
+}
+
+func TestEvictLeaderCleanConfigWithMissingStore(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddRegionStore(1, 0)
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+
+	cluster := &panicOnMissingStoreCluster{Cluster: tc}
+	tc.DeleteStore(tc.GetStore(1))
+
+	re.NotPanics(func() {
+		sl.(*evictLeaderScheduler).CleanConfig(cluster)
+	})
 }

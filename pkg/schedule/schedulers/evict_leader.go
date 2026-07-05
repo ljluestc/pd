@@ -100,7 +100,12 @@ func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (bool, erro
 	_, exists := conf.StoreIDWithRanges[id]
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id, constant.In)
+		if conf.cluster.GetStore(id) != nil {
+			conf.cluster.ResumeLeaderTransfer(id, constant.In)
+		} else {
+			log.Warn("skip resuming leader transfer for missing store while removing evict-leader config",
+				zap.Uint64("store-id", id))
+		}
 		return len(conf.StoreIDWithRanges) == 0, nil
 	}
 	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -166,6 +171,11 @@ func (conf *evictLeaderSchedulerConfig) resumeLeaderTransfer(cluster sche.Schedu
 	conf.RLock()
 	defer conf.RUnlock()
 	for id := range conf.StoreIDWithRanges {
+		if cluster.GetStore(id) == nil {
+			log.Warn("skip resuming leader transfer for missing store while cleaning evict-leader scheduler",
+				zap.Uint64("store-id", id))
+			continue
+		}
 		cluster.ResumeLeaderTransfer(id, constant.In)
 	}
 }
@@ -184,6 +194,11 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
 	conf.RLock()
 	defer conf.RUnlock()
+	if conf.cluster.GetStore(id) == nil {
+		log.Warn("skip resuming leader transfer for missing store while rolling back evict-leader config update",
+			zap.Uint64("store-id", id))
+		return
+	}
 	conf.cluster.ResumeLeaderTransfer(id, constant.In)
 }
 
